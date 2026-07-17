@@ -3,7 +3,7 @@ import { ContentRating, SourceIntents, type ExtensionInfo } from "@paperback/typ
 export default {
   name: "LightNovelWorld",
   description: "Paperback 0.9 source for lightnovelworld.org with cached novel chapter lists.",
-  version: "0.2.0",
+  version: "0.2.1",
   icon: "icon.svg",
   language: "en",
   contentRating: ContentRating.MATURE,
@@ -17,7 +17,7 @@ export default {
   ],
   developers: [
     {
-      name: "OpenCode",
+      name: "tob",
     },
   ],
 } satisfies ExtensionInfo;
