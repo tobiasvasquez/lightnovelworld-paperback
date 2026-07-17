@@ -1,0 +1,23 @@
+{
+  "name": "lightnovelworld-paperback",
+  "private": true,
+  "description": "Paperback 0.9 extension for LightNovelWorld.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "paperback-cli bundle",
+    "tsc": "tsc",
+    "bundle": "paperback-cli bundle",
+    "serve": "paperback-cli serve",
+    "dev": "paperback-cli serve --watch",
+    "test": "paperback-cli test --noConsole --output ./bundles/tests.json"
+  },
+  "devDependencies": {
+    "@paperback/toolchain": "^1.0.0-alpha.92",
+    "@paperback/types": "^1.0.0-alpha.92",
+    "cheerio": "^1.2.0",
+    "typescript": "^7.0.2"
+  }
+}
