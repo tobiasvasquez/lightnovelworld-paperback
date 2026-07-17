@@ -32,6 +32,7 @@ import LightNovelWorldConfig from "./pbconfig";
 
 export class LightNovelWorldExtension implements ExtensionImpl<typeof LightNovelWorldConfig> {
   private readonly parser = new LightNovelWorldParser();
+  private readonly chapterPayloadLimit = 120000;
 
   async getMangaDetails(mangaId: string): Promise<SourceManga> {
     const html = await fetchHTML(mangaUrl(mangaId), `${mangaUrl(mangaId)}`);
@@ -83,7 +84,7 @@ export class LightNovelWorldExtension implements ExtensionImpl<typeof LightNovel
 
         if (latestChapterCount !== undefined) {
           if (latestChapterCount === cache.chapters.length) {
-            return this.hydrateChapters(cache.chapters, sourceManga);
+            return this.prepareChaptersForReturn(this.hydrateChapters(cache.chapters, sourceManga), sourceManga);
           }
 
           if (latestChapterCount > cache.chapters.length) {
@@ -99,18 +100,18 @@ export class LightNovelWorldExtension implements ExtensionImpl<typeof LightNovel
               undefined,
               latestChapterCount,
             );
-            return this.hydrateChapters(updatedCache.chapters, sourceManga);
+            return this.prepareChaptersForReturn(this.hydrateChapters(updatedCache.chapters, sourceManga), sourceManga);
           }
         }
 
-        return this.hydrateChapters(cache.chapters, sourceManga);
+        return this.prepareChaptersForReturn(this.hydrateChapters(cache.chapters, sourceManga), sourceManga);
       } catch {
-        return this.hydrateChapters(cache.chapters, sourceManga);
+        return this.prepareChaptersForReturn(this.hydrateChapters(cache.chapters, sourceManga), sourceManga);
       }
     }
 
     const fullCache = await this.fetchAllChapters(sourceManga, cache);
-    return this.hydrateChapters(fullCache.chapters, sourceManga);
+    return this.prepareChaptersForReturn(this.hydrateChapters(fullCache.chapters, sourceManga), sourceManga);
   }
 
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
@@ -416,6 +417,62 @@ export class LightNovelWorldExtension implements ExtensionImpl<typeof LightNovel
       chunks.push(chapters.slice(index, index + CHAPTER_CACHE_CHUNK_SIZE));
     }
     return chunks;
+  }
+
+  private prepareChaptersForReturn(chapters: Chapter[], sourceManga: SourceManga): Chapter[] {
+    if (this.estimateChapterPayloadSize(chapters) <= this.chapterPayloadLimit) {
+      return chapters;
+    }
+
+    const compactChapters = chapters.map((chapter) => this.compactChapterForReturn(chapter, sourceManga));
+    if (this.estimateChapterPayloadSize(compactChapters) <= this.chapterPayloadLimit) {
+      return compactChapters;
+    }
+
+    return this.trimChaptersForPayload(compactChapters);
+  }
+
+  private compactChapterForReturn(chapter: Chapter, sourceManga: SourceManga): Chapter {
+    return {
+      chapterId: chapter.chapterId,
+      sourceManga,
+      chapNum: chapter.chapNum,
+    } as Chapter;
+  }
+
+  private trimChaptersForPayload(chapters: Chapter[]): Chapter[] {
+    const trimmed: Chapter[] = [];
+    let estimatedSize = 2;
+
+    for (let index = chapters.length - 1; index >= 0; index -= 1) {
+      const chapter = chapters[index];
+      const chapterSize = this.estimateChapterPayloadSize([chapter]) + (trimmed.length > 0 ? 1 : 0);
+      if (estimatedSize + chapterSize > this.chapterPayloadLimit) {
+        break;
+      }
+
+      trimmed.unshift(chapter);
+      estimatedSize += chapterSize;
+    }
+
+    return trimmed.length > 0 ? trimmed : chapters.slice(-1);
+  }
+
+  private estimateChapterPayloadSize(chapters: Chapter[]): number {
+    return JSON.stringify(
+      chapters.map((chapter) => ({
+        chapterId: chapter.chapterId,
+        chapNum: chapter.chapNum,
+        langCode: chapter.langCode,
+        title: chapter.title,
+        version: chapter.version,
+        volume: chapter.volume,
+        sortingIndex: chapter.sortingIndex,
+        publishDate: chapter.publishDate?.toISOString(),
+        creationDate: chapter.creationDate?.toISOString(),
+        additionalInfo: chapter.additionalInfo,
+      })),
+    ).length;
   }
 }
 
