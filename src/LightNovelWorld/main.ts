@@ -437,6 +437,7 @@ export class LightNovelWorldExtension implements ExtensionImpl<typeof LightNovel
       chapterId: chapter.chapterId,
       sourceManga,
       chapNum: chapter.chapNum,
+      langCode: chapter.langCode || "en",
     } as Chapter;
   }
 
