@@ -45,11 +45,8 @@ export class LightNovelWorldExtension implements ExtensionImpl<typeof LightNovel
       return { items: [] };
     }
 
-    const url = new URL(SEARCH_ENDPOINT);
-    url.searchParams.set("q", title);
-    url.searchParams.set("search_type", "title");
-
-    const response = await fetchJSON<SearchResponse>(url.toString());
+    const url = `${SEARCH_ENDPOINT}?q=${encodeURIComponent(title)}&search_type=title`;
+    const response = await fetchJSON<SearchResponse>(url);
     return {
       items: this.parser.parseSearchResults(response.novels ?? []),
     };

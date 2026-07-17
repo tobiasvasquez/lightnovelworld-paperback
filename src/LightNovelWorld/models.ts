@@ -57,30 +57,40 @@ export type ChapterPageInfo = {
   chapters: Chapter[];
 };
 
+function joinUrl(base: string, path: string): string {
+  if (!path) {
+    return base;
+  }
+
+  if (path.startsWith("http://") || path.startsWith("https://")) {
+    return path;
+  }
+
+  if (path.startsWith("//")) {
+    return `https:${path}`;
+  }
+
+  return `${base}${path.startsWith("/") ? "" : "/"}${path}`;
+}
+
 export function absoluteUrl(url: string | undefined): string {
   if (!url) {
     return "";
   }
 
-  try {
-    return new URL(url, DOMAIN).toString();
-  } catch {
-    return url;
-  }
+  return joinUrl(DOMAIN, url);
 }
 
 export function mangaUrl(mangaId: string): string {
-  return new URL(`/novel/${mangaId}/`, DOMAIN).toString();
+  return `${DOMAIN}/novel/${encodeURIComponent(mangaId)}/`;
 }
 
 export function chapterListUrl(mangaId: string, page: number): string {
-  const url = new URL(`/novel/${mangaId}/chapters/`, DOMAIN);
-  url.searchParams.set("page", String(page));
-  return url.toString();
+  return `${mangaUrl(mangaId)}chapters/?page=${encodeURIComponent(String(page))}`;
 }
 
 export function chapterUrl(mangaId: string, chapterId: string): string {
-  return new URL(`/novel/${mangaId}/chapter/${chapterId}/`, DOMAIN).toString();
+  return `${mangaUrl(mangaId)}chapter/${encodeURIComponent(chapterId)}/`;
 }
 
 export function cacheKey(mangaId: string): string {
