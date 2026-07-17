@@ -3,7 +3,8 @@ import type { Chapter, ContentRating } from "@paperback/types";
 export const DOMAIN = "https://lightnovelworld.org";
 export const SEARCH_ENDPOINT = `${DOMAIN}/api/search/`;
 export const CHAPTERS_PER_PAGE = 50;
-export const CACHE_VERSION = 1;
+export const CACHE_VERSION = 2;
+export const CHAPTER_CACHE_CHUNK_SIZE = 500;
 export const LANGUAGE = "en";
 
 export type SearchResponse = {
@@ -36,6 +37,10 @@ export type ChapterCache = {
   totalChapters?: number;
   chapters: SerializedChapter[];
   updatedAt: string;
+};
+
+export type ChapterCacheMetadata = Omit<ChapterCache, "chapters"> & {
+  chunkCount: number;
 };
 
 export type NovelPageInfo = {
@@ -95,4 +100,8 @@ export function chapterUrl(mangaId: string, chapterId: string): string {
 
 export function cacheKey(mangaId: string): string {
   return `lightnovelworld:chapters:v${CACHE_VERSION}:${mangaId}`;
+}
+
+export function cacheChunkKey(mangaId: string, chunkIndex: number): string {
+  return `${cacheKey(mangaId)}:chunk:${chunkIndex}`;
 }

@@ -13,11 +13,14 @@ import {
 
 import {
   CACHE_VERSION,
+  CHAPTER_CACHE_CHUNK_SIZE,
   CHAPTERS_PER_PAGE,
   SEARCH_ENDPOINT,
+  cacheChunkKey,
   cacheKey,
   chapterListUrl,
   chapterUrl,
+  type ChapterCacheMetadata,
   mangaUrl,
   type ChapterCache,
   type SerializedChapter,
@@ -199,8 +202,7 @@ export class LightNovelWorldExtension implements ExtensionImpl<typeof LightNovel
       totalChapters: knownTotalChapters ?? workingCache.totalChapters ?? workingCache.chapters.length,
       updatedAt: new Date().toISOString(),
     });
-    Application.setState(normalizedCache, cacheKey(sourceManga.mangaId));
-    return normalizedCache;
+    return this.saveCache(sourceManga.mangaId, normalizedCache);
   }
 
   private async fetchNewestChapters(
@@ -248,9 +250,23 @@ export class LightNovelWorldExtension implements ExtensionImpl<typeof LightNovel
       return undefined;
     }
 
-    const cache = state as Partial<ChapterCache>;
-    if (cache.version !== CACHE_VERSION || !Array.isArray(cache.chapters) || !Array.isArray(cache.fetchedPages)) {
+    const cache = state as Partial<ChapterCacheMetadata>;
+    if (
+      cache.version !== CACHE_VERSION ||
+      !Array.isArray(cache.fetchedPages) ||
+      typeof cache.chunkCount !== "number"
+    ) {
       return undefined;
+    }
+
+    const chapters: SerializedChapter[] = [];
+    for (let chunkIndex = 0; chunkIndex < cache.chunkCount; chunkIndex += 1) {
+      const chunk = Application.getState(cacheChunkKey(mangaId, chunkIndex));
+      if (!Array.isArray(chunk)) {
+        return undefined;
+      }
+
+      chapters.push(...chunk.filter(this.isSerializedChapter));
     }
 
     return this.normalizeCache({
@@ -259,7 +275,7 @@ export class LightNovelWorldExtension implements ExtensionImpl<typeof LightNovel
       fetchedPages: cache.fetchedPages.filter((page): page is number => typeof page === "number"),
       totalPages: typeof cache.totalPages === "number" ? cache.totalPages : undefined,
       totalChapters: typeof cache.totalChapters === "number" ? cache.totalChapters : undefined,
-      chapters: cache.chapters.filter(this.isSerializedChapter),
+      chapters,
       updatedAt: typeof cache.updatedAt === "string" ? cache.updatedAt : new Date(0).toISOString(),
     });
   }
@@ -301,8 +317,7 @@ export class LightNovelWorldExtension implements ExtensionImpl<typeof LightNovel
       updatedAt: new Date().toISOString(),
     });
 
-    Application.setState(normalizedCache, cacheKey(mangaId));
-    return normalizedCache;
+    return this.saveCache(mangaId, normalizedCache);
   }
 
   private normalizeCache(cache: ChapterCache): ChapterCache {
@@ -361,6 +376,46 @@ export class LightNovelWorldExtension implements ExtensionImpl<typeof LightNovel
       typeof chapter.chapNum === "number" &&
       typeof chapter.sortingIndex === "number"
     );
+  }
+
+  private saveCache(mangaId: string, cache: ChapterCache): ChapterCache {
+    const normalizedCache = this.normalizeCache(cache);
+    const chunks = this.chunkChapters(normalizedCache.chapters);
+    const existingState = Application.getState(cacheKey(mangaId));
+    const existingChunkCount =
+      existingState && typeof existingState === "object" && typeof (existingState as Partial<ChapterCacheMetadata>).chunkCount === "number"
+        ? (existingState as ChapterCacheMetadata).chunkCount
+        : 0;
+
+    const metadata: ChapterCacheMetadata = {
+      version: normalizedCache.version,
+      complete: normalizedCache.complete,
+      fetchedPages: normalizedCache.fetchedPages,
+      totalPages: normalizedCache.totalPages,
+      totalChapters: normalizedCache.totalChapters,
+      updatedAt: normalizedCache.updatedAt,
+      chunkCount: chunks.length,
+    };
+
+    for (const [index, chunk] of chunks.entries()) {
+      Application.setState(chunk, cacheChunkKey(mangaId, index));
+    }
+
+    for (let chunkIndex = chunks.length; chunkIndex < existingChunkCount; chunkIndex += 1) {
+      Application.setState([], cacheChunkKey(mangaId, chunkIndex));
+    }
+
+    Application.setState(metadata, cacheKey(mangaId));
+
+    return normalizedCache;
+  }
+
+  private chunkChapters(chapters: SerializedChapter[]): SerializedChapter[][] {
+    const chunks: SerializedChapter[][] = [];
+    for (let index = 0; index < chapters.length; index += CHAPTER_CACHE_CHUNK_SIZE) {
+      chunks.push(chapters.slice(index, index + CHAPTER_CACHE_CHUNK_SIZE));
+    }
+    return chunks;
   }
 }
 
