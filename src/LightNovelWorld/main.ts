@@ -16,27 +16,46 @@ import {
   CHAPTER_CACHE_CHUNK_SIZE,
   CHAPTERS_PER_PAGE,
   SEARCH_ENDPOINT,
+  buildPartTitle,
   cacheChunkKey,
   cacheKey,
   chapterListUrl,
   chapterUrl,
+  createPartMangaId,
+  formatPartRange,
+  getPartCount,
+  getSplitPart,
+  getVisiblePartChapterCount,
   type ChapterCacheMetadata,
   mangaUrl,
+  parsePartMangaId,
   type ChapterCache,
+  type SearchNovel,
   type SerializedChapter,
   type SearchResponse,
+  type SplitPartInfo,
+  shouldSplitTitle,
 } from "./models";
 import { fetchHTML, fetchJSON, mainRateLimiter } from "./network";
 import { LightNovelWorldParser } from "./parser";
 import LightNovelWorldConfig from "./pbconfig";
+
+type SourceRequest = {
+  baseSlug: string;
+  part?: SplitPartInfo;
+};
 
 export class LightNovelWorldExtension implements ExtensionImpl<typeof LightNovelWorldConfig> {
   private readonly parser = new LightNovelWorldParser();
   private readonly chapterPayloadLimit = 120000;
 
   async getMangaDetails(mangaId: string): Promise<SourceManga> {
-    const html = await fetchHTML(mangaUrl(mangaId), `${mangaUrl(mangaId)}`);
-    return this.parser.parseNovelPage(mangaId, html);
+    const request = this.getMangaRequest(mangaId);
+    const html = await fetchHTML(mangaUrl(request.baseSlug), mangaUrl(request.baseSlug));
+    const sourceManga = this.parser.parseNovelPage(request.baseSlug, html);
+    return request.part
+      ? this.createPartSourceManga(sourceManga, request.part, this.getKnownChapterCount(sourceManga))
+      : sourceManga;
   }
 
   async getSearchResults(
@@ -52,71 +71,22 @@ export class LightNovelWorldExtension implements ExtensionImpl<typeof LightNovel
     const url = `${SEARCH_ENDPOINT}?q=${encodeURIComponent(title)}&search_type=title`;
     const response = await fetchJSON<SearchResponse>(url);
     return {
-      items: this.parser.parseSearchResults(response.novels ?? []),
+      items: (response.novels ?? []).flatMap((result) => this.buildSearchResults(result)),
     };
   }
 
   async getChapters(sourceManga: SourceManga, sinceDate?: Date): Promise<Chapter[]> {
-    const cache = this.getCache(sourceManga.mangaId);
-
-    if (sinceDate) {
-      const latestChapterCount = await this.getLatestChapterCount(sourceManga);
-      const knownChapterCount = sourceManga.chapterCount ?? cache?.chapters.length ?? 0;
-
-      if (latestChapterCount !== undefined && knownChapterCount > 0) {
-        if (latestChapterCount <= knownChapterCount) {
-          return [];
-        }
-
-        const newChapters = await this.fetchNewestChapters(
-          sourceManga,
-          latestChapterCount - knownChapterCount,
-          latestChapterCount,
-        );
-        this.mergeIntoCache(sourceManga.mangaId, cache, newChapters, undefined, latestChapterCount);
-        return newChapters.filter((chapter) => !chapter.publishDate || chapter.publishDate > sinceDate);
-      }
-    }
-
-    if (cache?.complete) {
-      try {
-        const latestChapterCount = await this.getLatestChapterCount(sourceManga);
-
-        if (latestChapterCount !== undefined) {
-          if (latestChapterCount === cache.chapters.length) {
-            return this.prepareChaptersForReturn(this.hydrateChapters(cache.chapters, sourceManga), sourceManga);
-          }
-
-          if (latestChapterCount > cache.chapters.length) {
-            const newChapters = await this.fetchNewestChapters(
-              sourceManga,
-              latestChapterCount - cache.chapters.length,
-              latestChapterCount,
-            );
-            const updatedCache = this.mergeIntoCache(
-              sourceManga.mangaId,
-              cache,
-              newChapters,
-              undefined,
-              latestChapterCount,
-            );
-            return this.prepareChaptersForReturn(this.hydrateChapters(updatedCache.chapters, sourceManga), sourceManga);
-          }
-        }
-
-        return this.prepareChaptersForReturn(this.hydrateChapters(cache.chapters, sourceManga), sourceManga);
-      } catch {
-        return this.prepareChaptersForReturn(this.hydrateChapters(cache.chapters, sourceManga), sourceManga);
-      }
-    }
-
-    const fullCache = await this.fetchAllChapters(sourceManga, cache);
-    return this.prepareChaptersForReturn(this.hydrateChapters(fullCache.chapters, sourceManga), sourceManga);
+    const chapters = await this.resolveChaptersForSource(sourceManga);
+    const filteredChapters = sinceDate
+      ? chapters.filter((chapter) => !chapter.publishDate || chapter.publishDate > sinceDate)
+      : chapters;
+    return this.prepareChaptersForReturn(filteredChapters, sourceManga);
   }
 
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
-    const url = chapterUrl(chapter.sourceManga.mangaId, chapter.chapterId);
-    const html = await fetchHTML(url, mangaUrl(chapter.sourceManga.mangaId));
+    const request = this.getSourceRequest(chapter.sourceManga);
+    const url = chapterUrl(request.baseSlug, chapter.chapterId);
+    const html = await fetchHTML(url, mangaUrl(request.baseSlug));
     return this.parser.parseChapterDetails(chapter, html);
   }
 
@@ -124,9 +94,17 @@ export class LightNovelWorldExtension implements ExtensionImpl<typeof LightNovel
     updateManager: UpdateManager,
     _lastUpdateDate?: Date,
   ): Promise<void> {
+    const latestChapterCounts = new Map<string, number | undefined>();
+
     for (const sourceManga of updateManager.getQueuedItems()) {
+      const request = this.getSourceRequest(sourceManga);
+
       try {
-        const latestChapterCount = await this.getLatestChapterCount(sourceManga);
+        if (!latestChapterCounts.has(request.baseSlug)) {
+          latestChapterCounts.set(request.baseSlug, await this.getLatestChapterCount(request.baseSlug));
+        }
+
+        const latestChapterCount = latestChapterCounts.get(request.baseSlug);
         const knownChapterCount =
           sourceManga.chapterCount ?? (await updateManager.getNumberOfChapters(sourceManga.mangaId));
 
@@ -135,23 +113,22 @@ export class LightNovelWorldExtension implements ExtensionImpl<typeof LightNovel
           continue;
         }
 
-        if (latestChapterCount <= knownChapterCount) {
+        const visibleChapterCount = this.getVisibleChapterCountForRequest(request, latestChapterCount);
+        if (visibleChapterCount <= knownChapterCount) {
           await updateManager.setUpdatePriority(sourceManga.mangaId, "skip");
           continue;
         }
 
-        const newChapters = await this.fetchNewestChapters(
-          sourceManga,
-          latestChapterCount - knownChapterCount,
-          latestChapterCount,
-        );
+        const chapters = await this.resolveChaptersForSource(sourceManga, latestChapterCount);
+        const newChapters = chapters.slice(knownChapterCount);
 
-        if (newChapters.length === latestChapterCount - knownChapterCount) {
+        if (newChapters.length > 0) {
           await updateManager.setNewChapters(sourceManga.mangaId, newChapters);
+          await updateManager.setUpdatePriority(sourceManga.mangaId, "high");
+          continue;
         }
 
-        this.mergeIntoCache(sourceManga.mangaId, this.getCache(sourceManga.mangaId), newChapters, undefined, latestChapterCount);
-        await updateManager.setUpdatePriority(sourceManga.mangaId, "high");
+        await updateManager.setUpdatePriority(sourceManga.mangaId, "skip");
       } catch {
         await updateManager.setUpdatePriority(sourceManga.mangaId, "high");
       }
@@ -162,15 +139,176 @@ export class LightNovelWorldExtension implements ExtensionImpl<typeof LightNovel
     mainRateLimiter.registerInterceptor();
   }
 
-  private async fetchAllChapters(sourceManga: SourceManga, cache?: ChapterCache): Promise<ChapterCache> {
+  private buildSearchResults(result: SearchNovel): SearchResultItem[] {
+    const [baseResult] = this.parser.parseSearchResults([result]);
+    if (!baseResult) {
+      return [];
+    }
+
+    if (!shouldSplitTitle(result.latest_chapter_number)) {
+      return [baseResult];
+    }
+
+    return Array.from({ length: getPartCount(result.latest_chapter_number) }, (_, index) => {
+      const part = getSplitPart(result.slug, index + 1);
+      const subtitlePrefix = baseResult.subtitle?.trim() ? `${baseResult.subtitle.trim()} • ` : "";
+
+      return {
+        ...baseResult,
+        mangaId: createPartMangaId(result.slug, part.partNumber),
+        title: buildPartTitle(baseResult.title, part.partNumber),
+        subtitle: `${subtitlePrefix}Chapters ${formatPartRange(part, result.latest_chapter_number)}`,
+      };
+    });
+  }
+
+  private getMangaRequest(mangaId: string): SourceRequest {
+    const part = parsePartMangaId(mangaId);
+    if (part) {
+      return {
+        baseSlug: part.baseSlug,
+        part,
+      };
+    }
+
+    return { baseSlug: mangaId };
+  }
+
+  private getSourceRequest(sourceManga: SourceManga): SourceRequest {
+    const parsedRequest = this.getMangaRequest(sourceManga.mangaId);
+    if (parsedRequest.part) {
+      return parsedRequest;
+    }
+
+    const additionalInfo = sourceManga.mangaInfo.additionalInfo;
+    if (!additionalInfo?.baseSlug || !additionalInfo.partNumber) {
+      return parsedRequest;
+    }
+
+    const partNumber = Number(additionalInfo.partNumber);
+    if (!Number.isInteger(partNumber) || partNumber < 1) {
+      return parsedRequest;
+    }
+
+    return {
+      baseSlug: additionalInfo.baseSlug,
+      part: getSplitPart(additionalInfo.baseSlug, partNumber),
+    };
+  }
+
+  private createPartSourceManga(
+    sourceManga: SourceManga,
+    part: SplitPartInfo,
+    totalChapters?: number,
+  ): SourceManga {
+    const range = formatPartRange(part, totalChapters);
+    const synopsisPrefix = `Contains chapters ${range}.`;
+
+    return {
+      ...sourceManga,
+      mangaId: createPartMangaId(part.baseSlug, part.partNumber),
+      mangaInfo: {
+        ...sourceManga.mangaInfo,
+        primaryTitle: buildPartTitle(sourceManga.mangaInfo.primaryTitle, part.partNumber),
+        synopsis: sourceManga.mangaInfo.synopsis
+          ? `${synopsisPrefix}\n\n${sourceManga.mangaInfo.synopsis}`
+          : synopsisPrefix,
+        additionalInfo: {
+          ...sourceManga.mangaInfo.additionalInfo,
+          baseSlug: part.baseSlug,
+          partNumber: String(part.partNumber),
+          rangeStart: String(part.rangeStart),
+          rangeEnd: String(part.rangeEnd),
+          totalChapters: totalChapters ? String(totalChapters) : sourceManga.mangaInfo.additionalInfo?.totalChapters ?? "",
+        },
+      },
+    };
+  }
+
+  private createBaseSourceManga(sourceManga: SourceManga, baseSlug: string): SourceManga {
+    return sourceManga.mangaId === baseSlug
+      ? sourceManga
+      : {
+          ...sourceManga,
+          mangaId: baseSlug,
+          mangaInfo: {
+            ...sourceManga.mangaInfo,
+            additionalInfo: {
+              ...sourceManga.mangaInfo.additionalInfo,
+              baseSlug,
+            },
+          },
+        };
+  }
+
+  private async resolveChaptersForSource(
+    sourceManga: SourceManga,
+    latestChapterCount?: number,
+  ): Promise<Chapter[]> {
+    const request = this.getSourceRequest(sourceManga);
+    const baseSourceManga = this.createBaseSourceManga(sourceManga, request.baseSlug);
+    let cache = this.getCache(request.baseSlug);
+
+    if (cache?.complete) {
+      try {
+        const resolvedLatestChapterCount = latestChapterCount ?? (await this.getLatestChapterCount(request.baseSlug));
+        if (resolvedLatestChapterCount !== undefined && resolvedLatestChapterCount > cache.chapters.length) {
+          const newChapters = await this.fetchNewestChapters(
+            request.baseSlug,
+            baseSourceManga,
+            resolvedLatestChapterCount - cache.chapters.length,
+            resolvedLatestChapterCount,
+          );
+          cache = this.mergeIntoCache(
+            request.baseSlug,
+            cache,
+            newChapters,
+            undefined,
+            resolvedLatestChapterCount,
+          );
+        }
+      } catch {
+        // Use cached chapters when the refresh check fails.
+      }
+    }
+
+    if (!cache?.complete) {
+      cache = await this.fetchAllChapters(request.baseSlug, baseSourceManga, cache);
+    }
+
+    return this.filterChaptersForRequest(this.hydrateChapters(cache.chapters, sourceManga), request);
+  }
+
+  private filterChaptersForRequest(chapters: Chapter[], request: SourceRequest): Chapter[] {
+    if (!request.part) {
+      return chapters;
+    }
+
+    const part = request.part;
+
+    return chapters.filter(
+      (chapter) => chapter.chapNum >= part.rangeStart && chapter.chapNum <= part.rangeEnd,
+    );
+  }
+
+  private getVisibleChapterCountForRequest(request: SourceRequest, totalChapters: number): number {
+    return request.part ? getVisiblePartChapterCount(request.part, totalChapters) : totalChapters;
+  }
+
+  private async fetchAllChapters(
+    baseSlug: string,
+    sourceManga: SourceManga,
+    cache?: ChapterCache,
+  ): Promise<ChapterCache> {
     let workingCache = cache ?? this.createEmptyCache();
     const knownTotalChapters = this.getKnownChapterCount(sourceManga) ?? workingCache.totalChapters;
     const expectedPages = knownTotalChapters ? Math.max(1, Math.ceil(knownTotalChapters / CHAPTERS_PER_PAGE)) : undefined;
+    const baseSourceManga = this.createBaseSourceManga(sourceManga, baseSlug);
 
     if (!workingCache.totalPages) {
-      const firstPage = await this.fetchChapterPage(sourceManga, 1);
+      const firstPage = await this.fetchChapterPage(baseSlug, baseSourceManga, 1);
       workingCache = this.mergeIntoCache(
-        sourceManga.mangaId,
+        baseSlug,
         workingCache,
         firstPage.chapters,
         1,
@@ -185,9 +323,9 @@ export class LightNovelWorldExtension implements ExtensionImpl<typeof LightNovel
         continue;
       }
 
-      const chapterPage = await this.fetchChapterPage(sourceManga, page);
+      const chapterPage = await this.fetchChapterPage(baseSlug, baseSourceManga, page);
       workingCache = this.mergeIntoCache(
-        sourceManga.mangaId,
+        baseSlug,
         workingCache,
         chapterPage.chapters,
         page,
@@ -203,19 +341,21 @@ export class LightNovelWorldExtension implements ExtensionImpl<typeof LightNovel
       totalChapters: knownTotalChapters ?? workingCache.totalChapters ?? workingCache.chapters.length,
       updatedAt: new Date().toISOString(),
     });
-    return this.saveCache(sourceManga.mangaId, normalizedCache);
+    return this.saveCache(baseSlug, normalizedCache);
   }
 
   private async fetchNewestChapters(
+    baseSlug: string,
     sourceManga: SourceManga,
     newChapterCount: number,
     latestChapterCount: number,
   ): Promise<Chapter[]> {
     const totalPages = Math.max(1, Math.ceil(latestChapterCount / CHAPTERS_PER_PAGE));
     const collected: Chapter[] = [];
+    const baseSourceManga = this.createBaseSourceManga(sourceManga, baseSlug);
 
     for (let page = totalPages; page >= 1 && collected.length < newChapterCount; page -= 1) {
-      const chapterPage = await this.fetchChapterPage(sourceManga, page);
+      const chapterPage = await this.fetchChapterPage(baseSlug, baseSourceManga, page);
       collected.push(...chapterPage.chapters);
     }
 
@@ -224,14 +364,14 @@ export class LightNovelWorldExtension implements ExtensionImpl<typeof LightNovel
       .slice(-newChapterCount);
   }
 
-  private async fetchChapterPage(sourceManga: SourceManga, page: number) {
-    const url = chapterListUrl(sourceManga.mangaId, page);
-    const html = await fetchHTML(url, mangaUrl(sourceManga.mangaId));
+  private async fetchChapterPage(baseSlug: string, sourceManga: SourceManga, page: number) {
+    const url = chapterListUrl(baseSlug, page);
+    const html = await fetchHTML(url, mangaUrl(baseSlug));
     return this.parser.parseChapterListPage(sourceManga, html, page);
   }
 
-  private async getLatestChapterCount(sourceManga: SourceManga): Promise<number | undefined> {
-    const html = await fetchHTML(mangaUrl(sourceManga.mangaId), mangaUrl(sourceManga.mangaId));
+  private async getLatestChapterCount(baseSlug: string): Promise<number | undefined> {
+    const html = await fetchHTML(mangaUrl(baseSlug), mangaUrl(baseSlug));
     return this.parser.parseNovelPageInfo(html).totalChapters;
   }
 

@@ -5,6 +5,8 @@ export const SEARCH_ENDPOINT = `${DOMAIN}/api/search/`;
 export const CHAPTERS_PER_PAGE = 50;
 export const CACHE_VERSION = 2;
 export const CHAPTER_CACHE_CHUNK_SIZE = 500;
+export const SPLIT_THRESHOLD = 1000;
+export const PART_SIZE = 500;
 export const LANGUAGE = "en";
 
 export type SearchResponse = {
@@ -41,6 +43,13 @@ export type ChapterCache = {
 
 export type ChapterCacheMetadata = Omit<ChapterCache, "chapters"> & {
   chunkCount: number;
+};
+
+export type SplitPartInfo = {
+  baseSlug: string;
+  partNumber: number;
+  rangeStart: number;
+  rangeEnd: number;
 };
 
 export type NovelPageInfo = {
@@ -104,4 +113,58 @@ export function cacheKey(mangaId: string): string {
 
 export function cacheChunkKey(mangaId: string, chunkIndex: number): string {
   return `${cacheKey(mangaId)}:chunk:${chunkIndex}`;
+}
+
+export function shouldSplitTitle(totalChapters: number | undefined): totalChapters is number {
+  return typeof totalChapters === "number" && totalChapters > SPLIT_THRESHOLD;
+}
+
+export function getPartCount(totalChapters: number): number {
+  return Math.max(1, Math.ceil(totalChapters / PART_SIZE));
+}
+
+export function getSplitPart(baseSlug: string, partNumber: number): SplitPartInfo {
+  const rangeStart = (partNumber - 1) * PART_SIZE + 1;
+  return {
+    baseSlug,
+    partNumber,
+    rangeStart,
+    rangeEnd: rangeStart + PART_SIZE - 1,
+  };
+}
+
+export function createPartMangaId(baseSlug: string, partNumber: number): string {
+  return `${baseSlug}::part:${partNumber}`;
+}
+
+export function parsePartMangaId(mangaId: string): SplitPartInfo | undefined {
+  const match = mangaId.match(/^(.*)::part:(\d+)$/);
+  if (!match) {
+    return undefined;
+  }
+
+  const [, baseSlug, rawPartNumber] = match;
+  const partNumber = Number(rawPartNumber);
+  if (!baseSlug || !Number.isInteger(partNumber) || partNumber < 1) {
+    return undefined;
+  }
+
+  return getSplitPart(baseSlug, partNumber);
+}
+
+export function buildPartTitle(title: string, partNumber: number): string {
+  return `${title} Part ${String(partNumber).padStart(2, "0")}`;
+}
+
+export function formatPartRange(part: SplitPartInfo, totalChapters?: number): string {
+  const rangeEnd = totalChapters ? Math.min(totalChapters, part.rangeEnd) : part.rangeEnd;
+  return `${part.rangeStart}-${rangeEnd}`;
+}
+
+export function getVisiblePartChapterCount(part: SplitPartInfo, totalChapters: number): number {
+  if (totalChapters < part.rangeStart) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(totalChapters, part.rangeEnd) - part.rangeStart + 1);
 }
