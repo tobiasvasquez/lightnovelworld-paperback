@@ -1,7 +1,7 @@
 {
-  "name": "lightnovelworld-paperback",
+  "name": "paperback-extension-repository",
   "private": true,
-  "description": "Paperback 0.9 extension for LightNovelWorld.",
+  "description": "Paperback 0.9 extension repository.",
   "type": "module",
   "engines": {
     "node": ">=24"

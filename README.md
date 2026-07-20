@@ -1,6 +1,11 @@
-# LightNovelWorld Paperback 0.9
+# Paperback 0.9 Sources
 
-Production-ready `Paperback 0.9` source for `https://lightnovelworld.org/`.
+Production-ready `Paperback 0.9` extension repository with multiple sources in the same project.
+
+Current sources:
+
+- `LightNovelWorld`
+- `SkyNovels`
 
 ## Production Hosting
 
@@ -15,7 +20,7 @@ After the first push:
 5. Open `https://<your-user>.github.io/<repo>/versioning.json` and confirm it loads.
 6. In Paperback `0.9`, add `https://<your-user>.github.io/<repo>/` as a repository URL.
 
-Paperback should then show the `LightNovelWorld` source.
+Paperback should then show the sources published by this repository.
 
 ## Local Commands
 
@@ -51,3 +56,5 @@ npm run serve
   - `/versioning.json`
   - `/LightNovelWorld/info.json`
   - `/LightNovelWorld/index.js`
+  - `/SkyNovels/info.json`
+  - `/SkyNovels/index.js`

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="SkyNovels">
+  <defs>
+    <linearGradient id="sky-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#161b22" />
+      <stop offset="100%" stop-color="#8b1e1e" />
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#sky-bg)" />
+  <path d="M64 176 112 72h24l-48 104zm72 0 32-104h24l-32 104z" fill="#ffffff" />
+  <path d="M62 146h54l-10 22H52zm74 0h52l-7 22h-52z" fill="#fca5a5" />
+</svg>
