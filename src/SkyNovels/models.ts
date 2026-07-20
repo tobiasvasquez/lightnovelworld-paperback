@@ -143,8 +143,14 @@ export type SkyNovelsChapterDetails = {
   author_login?: string | null;
 };
 
+function buildQueryString(params: Record<string, string>): string {
+  return Object.entries(params)
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join("&");
+}
+
 export function searchApiUrl(query: string): string {
-  const params = new URLSearchParams({
+  const params = buildQueryString({
     page: "1",
     limit: String(SEARCH_PAGE_SIZE),
     q: query,
@@ -152,7 +158,7 @@ export function searchApiUrl(query: string): string {
     direction: "ASC",
     _ts: String(Date.now()),
   });
-  return `${API_DOMAIN}/api/novels?${params.toString()}`;
+  return `${API_DOMAIN}/api/novels?${params}`;
 }
 
 export function novelBaseApiUrl(novelId: string): string {
@@ -172,12 +178,12 @@ export function novelVolumesApiUrl(novelId: string): string {
 }
 
 export function volumeChaptersApiUrl(novelId: string, volumeId: number): string {
-  const params = new URLSearchParams({
+  const params = buildQueryString({
     page: "1",
     limit: "2000",
     _ts: String(Date.now()),
   });
-  return `${API_DOMAIN}/api/volumes/${encodeURIComponent(novelId)}/${encodeURIComponent(String(volumeId))}/chapters?${params.toString()}`;
+  return `${API_DOMAIN}/api/volumes/${encodeURIComponent(novelId)}/${encodeURIComponent(String(volumeId))}/chapters?${params}`;
 }
 
 export function chapterApiUrl(chapterId: string): string {
