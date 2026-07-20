@@ -1,0 +1,63 @@
+{
+  "buildTime": "2026-07-20T01:52:09.302Z",
+  "builtWith": {
+    "toolchain": "1.0.0-alpha.92",
+    "types": "1.0.0-alpha.92"
+  },
+  "repository": {
+    "name": "paperback-extension-repository",
+    "description": "Paperback 0.9 extension repository."
+  },
+  "sources": [
+    {
+      "name": "LightNovelWorld",
+      "description": "Paperback 0.9 source for lightnovelworld.org with cached novel chapter lists.",
+      "version": "0.2.2",
+      "icon": "icon.png",
+      "language": "en",
+      "contentRating": "MATURE",
+      "capabilities": [
+        64,
+        1
+      ],
+      "badges": [
+        {
+          "label": "Novel",
+          "textColor": "#ffffff",
+          "backgroundColor": "#3b82f6"
+        }
+      ],
+      "developers": [
+        {
+          "name": "tob"
+        }
+      ],
+      "id": "LightNovelWorld"
+    },
+    {
+      "name": "SkyNovels",
+      "description": "Paperback 0.9 source for skynovels.net using the public API.",
+      "version": "0.1.0",
+      "icon": "icon.svg",
+      "language": "es",
+      "contentRating": "MATURE",
+      "capabilities": [
+        64,
+        1
+      ],
+      "badges": [
+        {
+          "label": "Novel",
+          "textColor": "#ffffff",
+          "backgroundColor": "#d32f2f"
+        }
+      ],
+      "developers": [
+        {
+          "name": "tob"
+        }
+      ],
+      "id": "SkyNovels"
+    }
+  ]
+}

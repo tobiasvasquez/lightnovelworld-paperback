@@ -1,0 +1,1 @@
+{"name":"SkyNovels","description":"Paperback 0.9 source for skynovels.net using the public API.","version":"0.1.0","icon":"icon.svg","language":"es","contentRating":"MATURE","capabilities":[64,1],"badges":[{"label":"Novel","textColor":"#ffffff","backgroundColor":"#d32f2f"}],"developers":[{"name":"tob"}],"id":"SkyNovels"}
